@@ -20,6 +20,9 @@ export type SetupState =
   | "READY_LONG"
   | "READY_SHORT";
 
+export type RangePosition = "LOWER" | "MID" | "UPPER";
+export type SetupQuality = "LOW" | "MEDIUM" | "HIGH";
+
 export type SwingPoint = {
   index: number;
   price: number;
@@ -76,6 +79,8 @@ export type SignalAnalysis = {
   higherTimeframe: TimeframeSnapshot;
 
   setupState: SetupState;
+  rangePosition: RangePosition;
+  setupQuality: SetupQuality;
 
   fakeBreakout: boolean;
   liquiditySweep: boolean;
@@ -99,6 +104,10 @@ export type SignalAnalysis = {
   noTradeZone: boolean;
   longScore: number;
   shortScore: number;
+  triggerPrice?: number;
+  invalidationPrice?: number;
+  validIf?: string;
+  invalidIf?: string;
 
   trade?: TradeSetup;
   reasons: string[];
@@ -300,62 +309,6 @@ function calculateTrendStrength(
   return raw / price;
 }
 
-function buildLongTrade(
-  ema21: number,
-  swingLows: SwingPoint[],
-  price: number
-): TradeSetup | undefined {
-  const stopSource =
-    swingLows.length > 0 ? swingLows[swingLows.length - 1].price : ema21 * 0.995;
-
-  const entry = ema21;
-  const stopLoss = Math.min(stopSource, entry * 0.995);
-
-  if (entry <= stopLoss) return undefined;
-
-  const risk = entry - stopLoss;
-  if (risk / price < 0.0015) return undefined;
-
-  return {
-    entry,
-    stopLoss,
-    takeProfit1: entry + risk * 1,
-    takeProfit2: entry + risk * 2,
-    takeProfit3: entry + risk * 3,
-    riskReward1: 1,
-    riskReward2: 2,
-    riskReward3: 3,
-  };
-}
-
-function buildShortTrade(
-  ema21: number,
-  swingHighs: SwingPoint[],
-  price: number
-): TradeSetup | undefined {
-  const stopSource =
-    swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].price : ema21 * 1.005;
-
-  const entry = ema21;
-  const stopLoss = Math.max(stopSource, entry * 1.005);
-
-  if (stopLoss <= entry) return undefined;
-
-  const risk = stopLoss - entry;
-  if (risk / price < 0.0015) return undefined;
-
-  return {
-    entry,
-    stopLoss,
-    takeProfit1: entry - risk * 1,
-    takeProfit2: entry - risk * 2,
-    takeProfit3: entry - risk * 3,
-    riskReward1: 1,
-    riskReward2: 2,
-    riskReward3: 3,
-  };
-}
-
 function getHigherTimeframeBias(snapshot: TimeframeSnapshot): HigherTimeframeBias {
   const bullish =
     snapshot.price > snapshot.ema50 &&
@@ -424,6 +377,77 @@ function analyzeTimeframe(candles: KlineCandle[]): TimeframeSnapshot {
   };
 }
 
+function getRangeBounds(candles: KlineCandle[]) {
+  const recent = candles.slice(-30);
+  const high = Math.max(...recent.map((c) => c.high));
+  const low = Math.min(...recent.map((c) => c.low));
+  return { high, low, width: Math.max(high - low, 1e-9) };
+}
+
+function getRangePosition(price: number, low: number, high: number): RangePosition {
+  const width = Math.max(high - low, 1e-9);
+  const normalized = (price - low) / width;
+  if (normalized <= 0.33) return "LOWER";
+  if (normalized >= 0.67) return "UPPER";
+  return "MID";
+}
+
+function getSetupQuality(score: number): SetupQuality {
+  if (score >= 9) return "HIGH";
+  if (score >= 6) return "MEDIUM";
+  return "LOW";
+}
+
+function buildLongTrade(
+  entryBase: number,
+  stopBase: number,
+  price: number
+): TradeSetup | undefined {
+  const entry = entryBase;
+  const stopLoss = Math.min(stopBase, entry * 0.995);
+
+  if (entry <= stopLoss) return undefined;
+
+  const risk = entry - stopLoss;
+  if (risk / price < 0.0015) return undefined;
+
+  return {
+    entry,
+    stopLoss,
+    takeProfit1: entry + risk * 1,
+    takeProfit2: entry + risk * 2,
+    takeProfit3: entry + risk * 3,
+    riskReward1: 1,
+    riskReward2: 2,
+    riskReward3: 3,
+  };
+}
+
+function buildShortTrade(
+  entryBase: number,
+  stopBase: number,
+  price: number
+): TradeSetup | undefined {
+  const entry = entryBase;
+  const stopLoss = Math.max(stopBase, entry * 1.005);
+
+  if (stopLoss <= entry) return undefined;
+
+  const risk = stopLoss - entry;
+  if (risk / price < 0.0015) return undefined;
+
+  return {
+    entry,
+    stopLoss,
+    takeProfit1: entry - risk * 1,
+    takeProfit2: entry - risk * 2,
+    takeProfit3: entry - risk * 3,
+    riskReward1: 1,
+    riskReward2: 2,
+    riskReward3: 3,
+  };
+}
+
 export function analyzeSignal(
   candles5m: KlineCandle[],
   candles1h: KlineCandle[]
@@ -448,11 +472,13 @@ export function analyzeSignal(
 
   const rsiValues = calculateRSI(closes, 14);
   const rsi = rsiValues[rsiValues.length - 1];
+  const prevRsi = rsiValues[rsiValues.length - 2] ?? rsi;
 
   const macd = calculateMACD(closes, 12, 26, 9);
   const macdLine = macd.macdLine[macd.macdLine.length - 1];
   const macdSignal = macd.signalLine[macd.signalLine.length - 1];
   const macdHistogram = macd.histogram[macd.histogram.length - 1];
+  const prevMacdHistogram = macd.histogram[macd.histogram.length - 2] ?? macdHistogram;
 
   const currentVolume = volumes[volumes.length - 1];
   const averageVolume = average(volumes.slice(-20));
@@ -471,6 +497,7 @@ export function analyzeSignal(
   const liquiditySweep = detectLiquiditySweep(candles5m, swingHighs, swingLows);
 
   const lastCandle = candles5m[candles5m.length - 1];
+  const previousCandle = candles5m[candles5m.length - 2];
   const isBullishCandle = lastCandle.close > lastCandle.open;
   const isBearishCandle = lastCandle.close < lastCandle.open;
 
@@ -479,7 +506,6 @@ export function analyzeSignal(
 
   const isPullbackLong =
     price > ema21 && Math.abs(price - ema21) / price < 0.0025;
-
   const isPullbackShort =
     price < ema21 && Math.abs(price - ema21) / price < 0.0025;
 
@@ -495,7 +521,10 @@ export function analyzeSignal(
   const priorSwingLow = swingLows[swingLows.length - 2]?.price;
 
   const isRange = detectRange(candles5m, price);
-  const noTradeZone = isRange || structure === "RANGE";
+  const { high: rangeHigh, low: rangeLow } = getRangeBounds(candles5m);
+  const rangePosition = getRangePosition(price, rangeLow, rangeHigh);
+  const midRange = isRange && rangePosition === "MID";
+  const noTradeZone = midRange;
 
   let longScore = 0;
   let shortScore = 0;
@@ -504,21 +533,31 @@ export function analyzeSignal(
 
   const bullishEmaStack = ema9 > ema21 && ema21 > ema50 && ema50 > ema200;
   const bearishEmaStack = ema9 < ema21 && ema21 < ema50 && ema50 < ema200;
+  const bullishMomentum = rsi > 52 && rsi >= prevRsi && macdLine > macdSignal && macdHistogram >= prevMacdHistogram;
+  const bearishMomentum = rsi < 48 && rsi <= prevRsi && macdLine < macdSignal && macdHistogram <= prevMacdHistogram;
+  const strongVolume = volumeRatio >= 1.05;
+  const weakVolume = volumeRatio < 0.85;
 
   if (bullishEmaStack) longScore += 2;
   if (bearishEmaStack) shortScore += 2;
 
+  if (higherTimeframe.bias === "BULLISH") longScore += 3;
+  if (higherTimeframe.bias === "BEARISH") shortScore += 3;
+
+  if (higherTimeframe.structure === "BULLISH") longScore += 1;
+  if (higherTimeframe.structure === "BEARISH") shortScore += 1;
+
   if (price > ema21) longScore += 1;
   if (price < ema21) shortScore += 1;
 
-  if (rsi > 55) longScore += 1;
-  if (rsi < 45) shortScore += 1;
-
-  if (macdLine > macdSignal && macdHistogram > 0) longScore += 2;
-  if (macdLine < macdSignal && macdHistogram < 0) shortScore += 2;
+  if (bullishMomentum) longScore += 2;
+  if (bearishMomentum) shortScore += 2;
 
   if (bos === "BULLISH") longScore += 2;
   if (bos === "BEARISH") shortScore += 2;
+
+  if (choch === "BULLISH") longScore += 1;
+  if (choch === "BEARISH") shortScore += 1;
 
   if (isPullbackLong) longScore += 1;
   if (isPullbackShort) shortScore += 1;
@@ -526,136 +565,136 @@ export function analyzeSignal(
   if (bullishRejection) longScore += 1;
   if (bearishRejection) shortScore += 1;
 
-  if (volumeRatio > 1.1) {
+  if (strongVolume) {
     if (longScore >= shortScore) longScore += 1;
     if (shortScore >= longScore) shortScore += 1;
   }
 
-  if (higherTimeframe.bias === "BULLISH") longScore += 2;
-  if (higherTimeframe.bias === "BEARISH") shortScore += 2;
+  if (isRange && rangePosition === "LOWER") longScore += 1;
+  if (isRange && rangePosition === "UPPER") shortScore += 1;
 
-const bullishSetupContext =
-  higherTimeframe.bias === "BULLISH" &&
-  price > ema21 &&
-  ema21 > ema50 &&
-  macdLine > macdSignal;
+  const bullishAligned =
+    higherTimeframe.bias === "BULLISH" &&
+    price > ema21 &&
+    ema21 > ema50 &&
+    (structure === "BULLISH" || bos === "BULLISH" || choch === "BULLISH");
 
-const bearishSetupContext =
-  higherTimeframe.bias === "BEARISH" &&
-  price < ema21 &&
-  ema21 < ema50 &&
-  macdLine < macdSignal;
+  const bearishAligned =
+    higherTimeframe.bias === "BEARISH" &&
+    price < ema21 &&
+    ema21 < ema50 &&
+    (structure === "BEARISH" || bos === "BEARISH" || choch === "BEARISH");
 
-const timeframeConflict =
-  (structure === "BULLISH" && (bos === "BEARISH" || choch === "BEARISH")) ||
-  (structure === "BEARISH" && (bos === "BULLISH" || choch === "BULLISH")) ||
-  (higherTimeframe.bias === "BULLISH" &&
-    (bos === "BEARISH" || choch === "BEARISH")) ||
-  (higherTimeframe.bias === "BEARISH" &&
-    (bos === "BULLISH" || choch === "BULLISH"));
+  const timeframeConflict =
+    (structure === "BULLISH" && (bos === "BEARISH" || choch === "BEARISH")) ||
+    (structure === "BEARISH" && (bos === "BULLISH" || choch === "BULLISH")) ||
+    (higherTimeframe.bias === "BULLISH" &&
+      (bos === "BEARISH" || choch === "BEARISH")) ||
+    (higherTimeframe.bias === "BEARISH" &&
+      (bos === "BULLISH" || choch === "BULLISH"));
 
-if (timeframeConflict) {
-  setupState = "CONFLICT";
-} else if (bullishSetupContext) {
-  setupState = isPullbackLong || bullishRejection ? "READY_LONG" : "WATCHLIST_LONG";
-} else if (bearishSetupContext) {
-  setupState = isPullbackShort || bearishRejection ? "READY_SHORT" : "WATCHLIST_SHORT";
-}
-  if (noTradeZone) reasons.push("השוק מדשדש / אזור ללא מסחר");
-  if (volumeRatio < 0.8) reasons.push("הנפח חלש מדי");
+  const fakeBreakoutUp = !!(lastSwingHigh && lastCandle.high > lastSwingHigh && lastCandle.close < lastSwingHigh);
+  const fakeBreakoutDown = !!(lastSwingLow && lastCandle.low < lastSwingLow && lastCandle.close > lastSwingLow);
+
+  const longTrigger =
+    bullishAligned &&
+    !midRange &&
+    !timeframeConflict &&
+    !fakeBreakoutUp &&
+    !weakVolume &&
+    trendStrength >= 0.008 &&
+    rsi >= 50 &&
+    rsi <= 69 &&
+    (bos === "BULLISH" || bullishRejection || (isBullishCandle && lastCandle.close > previousCandle.high));
+
+  const shortTrigger =
+    bearishAligned &&
+    !midRange &&
+    !timeframeConflict &&
+    !fakeBreakoutDown &&
+    !weakVolume &&
+    trendStrength >= 0.008 &&
+    rsi <= 50 &&
+    rsi >= 31 &&
+    (bos === "BEARISH" || bearishRejection || (isBearishCandle && lastCandle.close < previousCandle.low));
+
+  const bullishWatch =
+    bullishAligned &&
+    !midRange &&
+    !timeframeConflict &&
+    !fakeBreakoutUp;
+
+  const bearishWatch =
+    bearishAligned &&
+    !midRange &&
+    !timeframeConflict &&
+    !fakeBreakoutDown;
+
+  if (timeframeConflict) {
+    setupState = "CONFLICT";
+  } else if (longTrigger) {
+    setupState = "READY_LONG";
+  } else if (shortTrigger) {
+    setupState = "READY_SHORT";
+  } else if (bullishWatch) {
+    setupState = "WATCHLIST_LONG";
+  } else if (bearishWatch) {
+    setupState = "WATCHLIST_SHORT";
+  }
+
+  if (midRange) reasons.push("המחיר באמצע הטווח - אזור חלש לכניסה");
+  if (isRange && rangePosition === "LOWER") reasons.push("המחיר בחלק התחתון של הטווח");
+  if (isRange && rangePosition === "UPPER") reasons.push("המחיר בחלק העליון של הטווח");
+  if (weakVolume) reasons.push("הנפח חלש מדי");
   if (trendStrength < 0.008) reasons.push("עוצמת המגמה חלשה מדי");
-  if (fakeBreakout) reasons.push("זוהתה פריצת שווא");
+  if (fakeBreakoutUp) reasons.push("זוהתה פריצת שווא כלפי מעלה");
+  if (fakeBreakoutDown) reasons.push("זוהתה פריצת שווא כלפי מטה");
   if (liquiditySweep) reasons.push("זוהתה גריפת נזילות");
   if (rsi > 72) reasons.push("RSI בקניית יתר");
   if (rsi < 28) reasons.push("RSI במכירת יתר");
-
-  if (higherTimeframe.bias === "NEUTRAL") {
-    reasons.push("ההטיה בטיימפריים הגבוה ניטרלית");
-  }
-
+  if (higherTimeframe.bias === "NEUTRAL") reasons.push("ההטיה בטיימפריים הגבוה ניטרלית");
   if (setupState === "CONFLICT") {
-  reasons.push("מבנה הטיימפריים הנמוך מתנגש עם BOS / CHoCH או עם ההטיה של הטיימפריים הגבוה");
-}
-
+    reasons.push("יש סתירה בין מבנה הטיימפריים הנמוך לבין ההטיה או שבירת המבנה");
+  }
   if (setupState === "WATCHLIST_LONG") {
-    reasons.push("קיים סטאפ שורי, ממתין לטריגר של פולבק / דחייה");
+    reasons.push("יש קונטקסט שורי, אבל עדיין חסר טריגר כניסה נקי");
   }
-
   if (setupState === "WATCHLIST_SHORT") {
-    reasons.push("קיים סטאפ דובי, ממתין לטריגר של פולבק / דחייה");
+    reasons.push("יש קונטקסט דובי, אבל עדיין חסר טריגר כניסה נקי");
+  }
+  if (higherTimeframe.bias === "BULLISH" && structure === "BEARISH") {
+    reasons.push("המבנה בטיימפריים הנמוך חלש מההטיה השורית של הטיימפריים הגבוה");
+  }
+  if (higherTimeframe.bias === "BEARISH" && structure === "BULLISH") {
+    reasons.push("המבנה בטיימפריים הנמוך חלש מההטיה הדובית של הטיימפריים הגבוה");
   }
 
-  if (structure === "BULLISH" && higherTimeframe.bias === "BEARISH") {
-    reasons.push("ההטיה בטיימפריים הגבוה מתנגשת עם סטאפ לונג בטיימפריים הנמוך");
-  }
+  const hardBlockLong =
+    timeframeConflict ||
+    midRange ||
+    weakVolume ||
+    trendStrength < 0.008 ||
+    fakeBreakoutUp ||
+    rsi > 72 ||
+    higherTimeframe.bias === "BEARISH";
 
-  if (structure === "BEARISH" && higherTimeframe.bias === "BULLISH") {
-    reasons.push("ההטיה בטיימפריים הגבוה מתנגשת עם סטאפ שורט בטיימפריים הנמוך");
-  }
+  const hardBlockShort =
+    timeframeConflict ||
+    midRange ||
+    weakVolume ||
+    trendStrength < 0.008 ||
+    fakeBreakoutDown ||
+    rsi < 28 ||
+    higherTimeframe.bias === "BULLISH";
 
-  const hardBlockers = [
-    noTradeZone,
-    volumeRatio < 0.8,
-    trendStrength < 0.008,
-    fakeBreakout,
-    liquiditySweep,
-    higherTimeframe.bias === "NEUTRAL",
-    (structure === "BULLISH" && higherTimeframe.bias === "BEARISH") ||
-      (structure === "BEARISH" && higherTimeframe.bias === "BULLISH"),
-    rsi > 72 || rsi < 28,
-  ];
+  const setupQuality = getSetupQuality(Math.max(longScore, shortScore));
+  const triggerPriceLong = Math.max(lastCandle.high, previousCandle.high);
+  const triggerPriceShort = Math.min(lastCandle.low, previousCandle.low);
+  const invalidationLong = lastSwingLow ?? Math.min(lastCandle.low, ema21);
+  const invalidationShort = lastSwingHigh ?? Math.max(lastCandle.high, ema21);
 
-  if (hardBlockers.some(Boolean)) {
-    return {
-      price,
-      ema9,
-      ema21,
-      ema50,
-      ema200,
-      rsi,
-      macd: macdLine,
-      macdSignal,
-      macdHistogram,
-      currentVolume,
-      averageVolume,
-      volumeRatio,
-      trendStrength,
-      structure,
-      bos,
-      choch,
-      higherTimeframe,
-      setupState,
-      fakeBreakout,
-      liquiditySweep,
-      bullishRejection,
-      bearishRejection,
-      isPullbackLong,
-      isPullbackShort,
-      isBullishCandle,
-      isBearishCandle,
-      previousHigh,
-      previousLow,
-      roundLevel,
-      lastSwingHigh,
-      lastSwingLow,
-      priorSwingHigh,
-      priorSwingLow,
-      noTradeZone,
-      longScore,
-      shortScore,
-      trade: undefined,
-      reasons,
-      confidence: "LOW",
-      decision: "WAIT",
-    };
-  }
-
-  if (
-    setupState === "READY_LONG" &&
-    rsi > 50 &&
-    isBullishCandle
-  ) {
-    const trade = buildLongTrade(ema21, swingLows, price);
+  if (setupState === "READY_LONG" && !hardBlockLong) {
+    const trade = buildLongTrade(triggerPriceLong, invalidationLong, price);
 
     if (trade) {
       return {
@@ -677,6 +716,8 @@ if (timeframeConflict) {
         choch,
         higherTimeframe,
         setupState,
+        rangePosition,
+        setupQuality,
         fakeBreakout,
         liquiditySweep,
         bullishRejection,
@@ -695,20 +736,24 @@ if (timeframeConflict) {
         noTradeZone,
         longScore,
         shortScore,
+        triggerPrice: triggerPriceLong,
+        invalidationPrice: invalidationLong,
+        validIf: `סגירת נר מעל ${triggerPriceLong.toFixed(2)}`,
+        invalidIf: `סגירת נר מתחת ${invalidationLong.toFixed(2)}`,
         trade,
-        reasons: ["הסטאפ השורי אושר עם הטיית טיימפריים גבוה וטריגר כניסה"],
-        confidence: longScore >= 9 ? "HIGH" : "MEDIUM",
+        reasons: [
+          "קיים יישור שורי בין הטיימפריים הגבוה והנמוך",
+          "יש טריגר לונג תקף עם אישור נר / מבנה",
+          `הכניסה נשענת על פריצת ${triggerPriceLong.toFixed(2)} והסטופ מתחת ${invalidationLong.toFixed(2)}`,
+        ],
+        confidence: setupQuality === "HIGH" ? "HIGH" : "MEDIUM",
         decision: "LONG",
       };
     }
   }
 
-  if (
-    setupState === "READY_SHORT" &&
-    rsi < 50 &&
-    isBearishCandle
-  ) {
-    const trade = buildShortTrade(ema21, swingHighs, price);
+  if (setupState === "READY_SHORT" && !hardBlockShort) {
+    const trade = buildShortTrade(triggerPriceShort, invalidationShort, price);
 
     if (trade) {
       return {
@@ -730,6 +775,8 @@ if (timeframeConflict) {
         choch,
         higherTimeframe,
         setupState,
+        rangePosition,
+        setupQuality,
         fakeBreakout,
         liquiditySweep,
         bullishRejection,
@@ -748,12 +795,28 @@ if (timeframeConflict) {
         noTradeZone,
         longScore,
         shortScore,
+        triggerPrice: triggerPriceShort,
+        invalidationPrice: invalidationShort,
+        validIf: `סגירת נר מתחת ${triggerPriceShort.toFixed(2)}`,
+        invalidIf: `סגירת נר מעל ${invalidationShort.toFixed(2)}`,
         trade,
-        reasons: ["הסטאפ הדובי אושר עם הטיית טיימפריים גבוה וטריגר כניסה"],
-        confidence: shortScore >= 9 ? "HIGH" : "MEDIUM",
+        reasons: [
+          "קיים יישור דובי בין הטיימפריים הגבוה והנמוך",
+          "יש טריגר שורט תקף עם אישור נר / מבנה",
+          `הכניסה נשענת על שבירה של ${triggerPriceShort.toFixed(2)} והסטופ מעל ${invalidationShort.toFixed(2)}`,
+        ],
+        confidence: setupQuality === "HIGH" ? "HIGH" : "MEDIUM",
         decision: "SHORT",
       };
     }
+  }
+
+  if (setupState === "READY_LONG" && hardBlockLong) {
+    reasons.push("הקונטקסט שורי, אבל יש חסם איכות שמונע כניסה עכשיו");
+  }
+
+  if (setupState === "READY_SHORT" && hardBlockShort) {
+    reasons.push("הקונטקסט דובי, אבל יש חסם איכות שמונע כניסה עכשיו");
   }
 
   return {
@@ -775,6 +838,8 @@ if (timeframeConflict) {
     choch,
     higherTimeframe,
     setupState,
+    rangePosition,
+    setupQuality,
     fakeBreakout,
     liquiditySweep,
     bullishRejection,
@@ -793,9 +858,33 @@ if (timeframeConflict) {
     noTradeZone,
     longScore,
     shortScore,
+    triggerPrice:
+      setupState === "WATCHLIST_LONG" || setupState === "READY_LONG"
+        ? triggerPriceLong
+        : setupState === "WATCHLIST_SHORT" || setupState === "READY_SHORT"
+          ? triggerPriceShort
+          : undefined,
+    invalidationPrice:
+      setupState === "WATCHLIST_LONG" || setupState === "READY_LONG"
+        ? invalidationLong
+        : setupState === "WATCHLIST_SHORT" || setupState === "READY_SHORT"
+          ? invalidationShort
+          : undefined,
+    validIf:
+      setupState === "WATCHLIST_LONG" || setupState === "READY_LONG"
+        ? `סגירת נר מעל ${triggerPriceLong.toFixed(2)}`
+        : setupState === "WATCHLIST_SHORT" || setupState === "READY_SHORT"
+          ? `סגירת נר מתחת ${triggerPriceShort.toFixed(2)}`
+          : undefined,
+    invalidIf:
+      setupState === "WATCHLIST_LONG" || setupState === "READY_LONG"
+        ? `סגירת נר מתחת ${invalidationLong.toFixed(2)}`
+        : setupState === "WATCHLIST_SHORT" || setupState === "READY_SHORT"
+          ? `סגירת נר מעל ${invalidationShort.toFixed(2)}`
+          : undefined,
     trade: undefined,
-    reasons: reasons.length ? reasons : ["אין כרגע סטאפ נקי"],
-    confidence: "LOW",
+    reasons: reasons.length ? reasons : ["כרגע עדיף להמתין לאישור נוסף, אין טרייד איכותי."],
+    confidence: setupQuality === "HIGH" ? "MEDIUM" : "LOW",
     decision: "WAIT",
   };
 }
