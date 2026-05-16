@@ -133,7 +133,11 @@ async function run() {
     }
   }
 
-  await trackOpenAlerts();
+  try {
+    await trackOpenAlerts();
+  } catch (error) {
+    console.error("מעקב התראות נכשל:", error);
+  }
 }
 
 run().catch((error) => {

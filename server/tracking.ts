@@ -132,7 +132,15 @@ function buildTrackingPatch(evaluation: EvaluatedTrade): AlertTrackingPatch {
 }
 
 export async function trackOpenAlerts() {
-  const alerts = await listOpenTradeAlerts();
+  let alerts: TrackedAlert[];
+
+  try {
+    alerts = await listOpenTradeAlerts();
+  } catch (error) {
+    console.error("טעינת התראות פתוחות למעקב נכשלה:", error);
+    return;
+  }
+
   if (alerts.length === 0) {
     console.log("אין התראות פתוחות למעקב.");
     return;

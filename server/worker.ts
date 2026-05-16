@@ -160,7 +160,11 @@ async function runCycle() {
     }
   }
 
-  await trackOpenAlerts();
+  try {
+    await trackOpenAlerts();
+  } catch (error) {
+    console.error("מעקב התראות נכשל, ה-worker ימשיך במחזור הבא:", error);
+  }
 }
 
 async function startWorker() {
