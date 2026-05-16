@@ -105,6 +105,42 @@ export function calculateSMA(values: number[], period: number): number[] {
   return result;
 }
 
+export type AtrCandle = {
+  high: number;
+  low: number;
+  close: number;
+};
+
+export function calculateATR(candles: AtrCandle[], period: number = 14): number[] {
+  if (candles.length === 0) return [];
+
+  const trueRanges = candles.map((candle, index) => {
+    if (index === 0) return candle.high - candle.low;
+
+    const previousClose = candles[index - 1].close;
+    return Math.max(
+      candle.high - candle.low,
+      Math.abs(candle.high - previousClose),
+      Math.abs(candle.low - previousClose)
+    );
+  });
+
+  if (trueRanges.length < period) {
+    return new Array(candles.length).fill(NaN);
+  }
+
+  const atr: number[] = new Array(candles.length).fill(NaN);
+  let currentAtr = average(trueRanges.slice(0, period));
+  atr[period - 1] = currentAtr;
+
+  for (let i = period; i < trueRanges.length; i++) {
+    currentAtr = (currentAtr * (period - 1) + trueRanges[i]) / period;
+    atr[i] = currentAtr;
+  }
+
+  return atr;
+}
+
 export function average(values: number[]): number {
   if (!values.length) return 0;
   return values.reduce((acc, v) => acc + v, 0) / values.length;
