@@ -9,6 +9,8 @@ npm run dev
 npm run build
 npm run worker:once
 npm run worker
+npm run tracking:once
+npm run backtest
 ```
 
 ## Environment
@@ -29,6 +31,8 @@ SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
 LOW_INTERVAL=5m
 HIGH_INTERVAL=1h
 WORKER_INTERVAL_MS=300000
+TRACKING_CANDLE_LIMIT=500
+BACKTEST_ALERT_LIMIT=1000
 ```
 
 `SYMBOL` / `SYMBOLS` משמשים fallback אם CoinGecko או Binance לא זמינים.
@@ -44,7 +48,22 @@ supabase.schema.sql
 הטבלאות:
 
 - `signal_analyses` - כל ניתוח שנוצר לכל צמד.
-- `alerts` - התראות שנשלחו, כולל `alert_key` ייחודי למניעת כפילויות אחרי restart.
+- `alerts` - התראות שנשלחו, כולל `alert_key` ייחודי למניעת כפילויות אחרי restart, מצב עסקה, TP/SL ותוצאת R.
+
+## Tracking / Backtest
+
+בכל מחזור worker המערכת בודקת התראות `TRADE` פתוחות מול נרות Binance ומעדכנת:
+
+- `status`: פתוחה, TP1, TP2 או סגורה.
+- `outcome`: TP1/TP2/TP3, סטופ, או סטופ אחרי יעד.
+- `max_r` ו-`result_r`: תנועה מקסימלית ותוצאה בפועל ביחידות R.
+
+להרצה ידנית:
+
+```bash
+npm run tracking:once
+npm run backtest
+```
 
 ## Alert Policy
 

@@ -10,6 +10,7 @@ import {
 } from "./alert-message";
 import { alertExists, saveAlert, saveSignalAnalysis } from "./supabase";
 import { sendTelegramMessage } from "./telegram";
+import { trackOpenAlerts } from "./tracking";
 
 const LOW_INTERVAL = process.env.LOW_INTERVAL || "5m";
 const HIGH_INTERVAL = process.env.HIGH_INTERVAL || "1h";
@@ -158,6 +159,8 @@ async function runCycle() {
       console.error(`שגיאה בניתוח ${symbol}:`, error);
     }
   }
+
+  await trackOpenAlerts();
 }
 
 async function startWorker() {

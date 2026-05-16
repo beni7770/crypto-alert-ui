@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "worker": "tsx server/worker.ts",
     "worker:once": "tsx server/run-once.ts",
+    "tracking:once": "tsx server/tracking.ts",
+    "backtest": "tsx server/backtest.ts",
     "worker:dev": "tsx watch server/worker.ts",
     "start": "tsx server/worker.ts"
   },
