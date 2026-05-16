@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { fileURLToPath } from "node:url";
 import { getKlines } from "../src/lib/binance";
 import { getMarketUniverse, getUniverseConfigFromEnv } from "../src/lib/market-universe";
 import { analyzeSignal, type SignalAnalysis } from "../src/lib/signal-engine";
@@ -122,7 +123,7 @@ async function maybeSendAlert(symbol: string, result: SignalAnalysis, btcContext
   }
 }
 
-async function runCycle() {
+export async function runCycle() {
   const startedAt = new Date().toISOString();
   const universe = await getMarketUniverse(getUniverseConfigFromEnv(process.env));
   const symbols = universe.map((coin) => coin.binanceSymbol);
@@ -167,7 +168,7 @@ async function runCycle() {
   }
 }
 
-async function startWorker() {
+export async function startWorker() {
   console.log("ה-worker הופעל.");
   console.log(`טיימפריים נמוך: ${LOW_INTERVAL}`);
   console.log(`טיימפריים גבוה: ${HIGH_INTERVAL}`);
@@ -183,7 +184,9 @@ async function startWorker() {
   }, LOOP_MS);
 }
 
-startWorker().catch((error) => {
-  console.error("שגיאה בהפעלת ה-worker:", error);
-  process.exit(1);
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  startWorker().catch((error) => {
+    console.error("שגיאה בהפעלת ה-worker:", error);
+    process.exit(1);
+  });
+}

@@ -77,6 +77,23 @@ export type AlertTrackingPatch = Partial<{
   last_checked_at: string;
 }>;
 
+export type StoredSignalAnalysis = {
+  id: number;
+  created_at: string;
+  symbol: string;
+  low_interval: string;
+  high_interval: string;
+  decision: SignalAnalysis["decision"];
+  setup_state: SignalAnalysis["setupState"];
+  setup_quality: SignalAnalysis["setupQuality"];
+  confidence: SignalAnalysis["confidence"];
+  price: number;
+  trigger_price: number | null;
+  invalidation_price: number | null;
+  btc_context: BtcContextStatus;
+  analysis: SignalAnalysis;
+};
+
 export function isSupabaseConfigured() {
   return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -249,6 +266,28 @@ export async function listTrackedAlerts(limit = 1000) {
   });
 
   return selectRows<TrackedAlert>("alerts", params);
+}
+
+export async function listRecentAlerts(limit = 200) {
+  const params = new URLSearchParams({
+    select:
+      "id,created_at,symbol,alert_key,alert_type,decision,setup_state,setup_quality,analysis,status,outcome,direction,entry_price,stop_loss,take_profit1,take_profit2,take_profit3,max_r,result_r,opened_at,closed_at,last_checked_at",
+    order: "created_at.desc",
+    limit: String(limit),
+  });
+
+  return selectRows<TrackedAlert>("alerts", params);
+}
+
+export async function listRecentSignalAnalyses(limit = 200) {
+  const params = new URLSearchParams({
+    select:
+      "id,created_at,symbol,low_interval,high_interval,decision,setup_state,setup_quality,confidence,price,trigger_price,invalidation_price,btc_context,analysis",
+    order: "created_at.desc",
+    limit: String(limit),
+  });
+
+  return selectRows<StoredSignalAnalysis>("signal_analyses", params);
 }
 
 export async function updateAlertTracking(id: number, patch: AlertTrackingPatch) {

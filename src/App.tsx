@@ -1,16 +1,29 @@
-import { useEffect, useState } from "react";
-import { getKlines } from "./lib/binance";
-import { getMarketUniverse, type MarketUniverseCoin } from "./lib/market-universe";
-import { analyzeSignal, type SignalAnalysis } from "./lib/signal-engine";
+import { useEffect, useMemo, useState } from "react";
+import type { DashboardAlert, DashboardResponse, DashboardSymbol } from "./lib/dashboard-types";
 
-type SymbolCard = {
-  coin: MarketUniverseCoin;
-  analysis?: SignalAnalysis;
-  btcContext: "SELF" | "SUPPORTS" | "AGAINST" | "NEUTRAL" | "UNKNOWN";
-  error?: string;
-};
+type AlertFilter = "ALL" | "OPEN" | "CLOSED" | "WATCHLIST";
 
-function translateDecision(decision: SignalAnalysis["decision"]) {
+function formatNumber(value: number | null | undefined, digits = 2) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  return value.toLocaleString("he-IL", {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  });
+}
+
+function formatPercent(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("he-IL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
+function translateDecision(decision: string) {
   switch (decision) {
     case "LONG":
       return "לונג";
@@ -21,7 +34,7 @@ function translateDecision(decision: SignalAnalysis["decision"]) {
   }
 }
 
-function translateQuality(quality: SignalAnalysis["setupQuality"]) {
+function translateQuality(quality: string) {
   switch (quality) {
     case "HIGH":
       return "גבוהה";
@@ -32,85 +45,190 @@ function translateQuality(quality: SignalAnalysis["setupQuality"]) {
   }
 }
 
-function translateBtcContext(status: SymbolCard["btcContext"]) {
+function translateStatus(status: string) {
   switch (status) {
-    case "SELF":
-      return "BTC";
-    case "SUPPORTS":
-      return "BTC תומך";
-    case "AGAINST":
-      return "BTC נגד";
-    case "NEUTRAL":
-      return "BTC ניטרלי";
+    case "OPEN":
+      return "פתוחה";
+    case "TP1":
+      return "TP1";
+    case "TP2":
+      return "TP2";
+    case "CLOSED":
+      return "סגורה";
+    case "WATCHLIST":
+      return "מעקב";
     default:
-      return "לא נבדק";
+      return status;
   }
 }
 
-function getBtcContext(symbol: string, result?: SignalAnalysis, btcResult?: SignalAnalysis): SymbolCard["btcContext"] {
-  if (symbol === "BTCUSDT") return "SELF";
-  if (!result || !btcResult) return "UNKNOWN";
-  if (btcResult.context.direction === "NEUTRAL") return "NEUTRAL";
-  if (!result.setup.direction) return "NEUTRAL";
-  return btcResult.context.direction === result.setup.direction ? "SUPPORTS" : "AGAINST";
+function decisionClass(decision: string, setupState?: string) {
+  if (decision === "LONG") return "positive";
+  if (decision === "SHORT") return "negative";
+  if (setupState?.startsWith("WATCHLIST")) return "info";
+  return "neutral";
 }
 
-async function analyzeSymbol(symbol: string) {
-  const [candles5m, candles1h] = await Promise.all([
-    getKlines(symbol, "5m", 200),
-    getKlines(symbol, "1h", 200),
-  ]);
+function StatCard({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <article className={`stat-card ${tone ?? ""}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </article>
+  );
+}
 
-  return analyzeSignal(candles5m, candles1h);
+function SymbolCard({ symbol }: { symbol: DashboardSymbol }) {
+  return (
+    <article className={`symbol-card ${decisionClass(symbol.decision, symbol.setupState)}`}>
+      <header>
+        <div>
+          <h2>{symbol.symbol}</h2>
+          <span>{formatDate(symbol.createdAt)}</span>
+        </div>
+        <b>{translateDecision(symbol.decision)}</b>
+      </header>
+
+      <dl>
+        <div>
+          <dt>מחיר</dt>
+          <dd>{formatNumber(symbol.price)}</dd>
+        </div>
+        <div>
+          <dt>איכות</dt>
+          <dd>{translateQuality(symbol.setupQuality)}</dd>
+        </div>
+        <div>
+          <dt>BTC</dt>
+          <dd>{symbol.btcContext}</dd>
+        </div>
+        <div>
+          <dt>מומנטום</dt>
+          <dd>{symbol.momentum}</dd>
+        </div>
+        <div>
+          <dt>EMA</dt>
+          <dd>{symbol.emaStack}</dd>
+        </div>
+        <div>
+          <dt>נפח</dt>
+          <dd>{symbol.volumeState}</dd>
+        </div>
+      </dl>
+
+      <footer>
+        <p>{symbol.validIf ?? "אין טריגר כניסה כרגע"}</p>
+        <p>{symbol.invalidIf ?? "אין תנאי ביטול פעיל"}</p>
+      </footer>
+    </article>
+  );
+}
+
+function alertMatchesFilter(alert: DashboardAlert, filter: AlertFilter) {
+  if (filter === "ALL") return true;
+  if (filter === "WATCHLIST") return alert.alertType === "WATCHLIST";
+  if (filter === "OPEN") return alert.alertType === "TRADE" && alert.status !== "CLOSED";
+  return alert.alertType === "TRADE" && alert.status === "CLOSED";
+}
+
+function AlertsTable({ alerts }: { alerts: DashboardAlert[] }) {
+  const [filter, setFilter] = useState<AlertFilter>("ALL");
+  const filteredAlerts = useMemo(
+    () => alerts.filter((alert) => alertMatchesFilter(alert, filter)),
+    [alerts, filter]
+  );
+
+  return (
+    <section className="table-section">
+      <header className="section-header">
+        <div>
+          <h2>התראות ועסקאות</h2>
+          <p>מעקב אחר התראות Telegram, TP/SL ותוצאה ביחידות R</p>
+        </div>
+        <div className="segmented">
+          {(["ALL", "OPEN", "CLOSED", "WATCHLIST"] as AlertFilter[]).map((option) => (
+            <button
+              key={option}
+              className={filter === option ? "active" : ""}
+              type="button"
+              onClick={() => setFilter(option)}
+            >
+              {option === "ALL"
+                ? "הכול"
+                : option === "OPEN"
+                  ? "פתוחות"
+                  : option === "CLOSED"
+                    ? "סגורות"
+                    : "מעקב"}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>צמד</th>
+              <th>כיוון</th>
+              <th>איכות</th>
+              <th>סטטוס</th>
+              <th>כניסה</th>
+              <th>סטופ</th>
+              <th>TP1</th>
+              <th>TP2</th>
+              <th>TP3</th>
+              <th>Max R</th>
+              <th>Result R</th>
+              <th>זמן</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredAlerts.map((alert) => (
+              <tr key={alert.id}>
+                <td>
+                  <strong>{alert.symbol}</strong>
+                  <span>{alert.setupState}</span>
+                </td>
+                <td className={decisionClass(alert.decision)}>{translateDecision(alert.decision)}</td>
+                <td>{translateQuality(alert.setupQuality)}</td>
+                <td>{translateStatus(alert.status)}</td>
+                <td>{formatNumber(alert.entryPrice)}</td>
+                <td>{formatNumber(alert.stopLoss)}</td>
+                <td>{formatNumber(alert.takeProfit1)}</td>
+                <td>{formatNumber(alert.takeProfit2)}</td>
+                <td>{formatNumber(alert.takeProfit3)}</td>
+                <td>{formatNumber(alert.maxR)}</td>
+                <td className={(alert.resultR ?? 0) >= 0 ? "positive" : "negative"}>
+                  {alert.resultR === null ? "-" : `${formatNumber(alert.resultR)}R`}
+                </td>
+                <td>{formatDate(alert.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 export default function App() {
-  const [cards, setCards] = useState<SymbolCard[]>([]);
+  const [data, setData] = useState<DashboardResponse | null>(null);
   const [error, setError] = useState("");
-  const [lastUpdate, setLastUpdate] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
+    async function loadDashboard() {
       try {
         setError("");
-        setLoading(true);
+        const res = await fetch("/api/dashboard");
+        const payload = (await res.json()) as DashboardResponse | { error?: string };
 
-        const universe = await getMarketUniverse({
-          mode: "TOP_MARKET_CAP",
-          limit: 10,
-          fallbackSymbol: "BTCUSDT",
-        });
-        const btcCoin = universe.find((coin) => coin.binanceSymbol === "BTCUSDT");
-        const btcAnalysis = btcCoin ? await analyzeSymbol("BTCUSDT") : undefined;
+        if (!res.ok) {
+          throw new Error("error" in payload && payload.error ? payload.error : "טעינת הדשבורד נכשלה");
+        }
 
-        const results = await Promise.allSettled(
-          universe.map(async (coin) => {
-            const analysis =
-              coin.binanceSymbol === "BTCUSDT" && btcAnalysis
-                ? btcAnalysis
-                : await analyzeSymbol(coin.binanceSymbol);
-
-            return {
-              coin,
-              analysis,
-              btcContext: getBtcContext(coin.binanceSymbol, analysis, btcAnalysis),
-            } satisfies SymbolCard;
-          })
-        );
-
-        setCards(
-          results.map((result, index) => {
-            if (result.status === "fulfilled") return result.value;
-
-            return {
-              coin: universe[index],
-              btcContext: "UNKNOWN",
-              error: result.reason instanceof Error ? result.reason.message : "שגיאה לא ידועה",
-            };
-          })
-        );
-        setLastUpdate(new Date().toLocaleTimeString());
+        setData(payload as DashboardResponse);
       } catch (err) {
         setError(err instanceof Error ? err.message : "שגיאה לא ידועה");
       } finally {
@@ -118,101 +236,56 @@ export default function App() {
       }
     }
 
-    load();
-    const interval = setInterval(load, 60000);
-
+    loadDashboard();
+    const interval = setInterval(loadDashboard, 60000);
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <div
-      style={{
-        padding: 24,
-        fontFamily: "Arial",
-        minHeight: "100vh",
-        background: "#0b1020",
-        color: "white",
-        direction: "rtl",
-        textAlign: "right",
-      }}
-    >
-      <h1>סוכן התראות קריפטו</h1>
-      <p>מצב: Top 10 לפי שווי שוק, צמדי USDT ב-Binance</p>
-      <p>טיימפריים: 5 דקות / שעה</p>
-      <p>עדכון אחרון: {lastUpdate || "טוען..."}</p>
-      <p>Telegram ו-Supabase רצים בצד השרת בלבד.</p>
+    <main className="app-shell" dir="rtl">
+      <section className="topbar">
+        <div>
+          <h1>Crypto Alert Agent</h1>
+          <p>דשבורד ביצועים והתראות מתוך Supabase</p>
+        </div>
+        <div className="sync-status">
+          <span>{loading ? "טוען נתונים" : "עדכון אחרון"}</span>
+          <strong>{data ? formatDate(data.generatedAt) : "-"}</strong>
+        </div>
+      </section>
 
-      {loading && <p>מרענן נתונים...</p>}
+      {error && <div className="error-banner">{error}</div>}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: 12,
-          maxWidth: 1280,
-          marginTop: 20,
-        }}
-      >
-        {cards.map(({ coin, analysis, btcContext, error: cardError }) => {
-          const color =
-            analysis?.decision === "LONG"
-              ? "#22c55e"
-              : analysis?.decision === "SHORT"
-                ? "#ef4444"
-                : analysis?.setupState.startsWith("WATCHLIST")
-                  ? "#38bdf8"
-                  : "#f59e0b";
+      {data && (
+        <>
+          <section className="stats-grid">
+            <StatCard label="סה״כ התראות" value={String(data.summary.totalAlerts)} />
+            <StatCard label="עסקאות פתוחות" value={String(data.summary.openTrades)} tone="info" />
+            <StatCard label="עסקאות סגורות" value={String(data.summary.closedTrades)} />
+            <StatCard label="Win rate" value={formatPercent(data.summary.winRate)} tone="positive" />
+            <StatCard label="Total R" value={`${formatNumber(data.summary.totalR)}R`} tone="positive" />
+            <StatCard label="Average R" value={`${formatNumber(data.summary.averageR)}R`} />
+            <StatCard label="צמד חזק" value={data.summary.bestSymbol ?? "-"} />
+            <StatCard label="צמד חלש" value={data.summary.worstSymbol ?? "-"} tone="negative" />
+          </section>
 
-          return (
-            <div
-              key={coin.binanceSymbol}
-              style={{
-                border: `1px solid ${color}`,
-                borderRadius: 8,
-                background: "#111827",
-                padding: 14,
-                minHeight: 260,
-              }}
-            >
-              <h2 style={{ marginTop: 0, marginBottom: 4 }}>{coin.binanceSymbol}</h2>
-              <p style={{ marginTop: 0 }}>{coin.name} {coin.marketCapRank ? `#${coin.marketCapRank}` : ""}</p>
-
-              {cardError && <p style={{ color: "#ef4444" }}>שגיאה: {cardError}</p>}
-
-              {analysis && (
-                <>
-                  <p>החלטה: {translateDecision(analysis.decision)}</p>
-                  <p>סטאפ: {analysis.setupState}</p>
-                  <p>איכות: {translateQuality(analysis.setupQuality)}</p>
-                  <p>מחיר: {analysis.price.toFixed(2)}</p>
-                  <p>BTC: {translateBtcContext(btcContext)}</p>
-                  <p>Context: {analysis.context.direction}</p>
-                  <p>EMA: {analysis.context.emaStack}</p>
-                  <p>מומנטום: {analysis.context.momentum}</p>
-                  <p>נפח: {analysis.context.volumeState}</p>
-                  <p>כניסה: {analysis.validIf ?? "-"}</p>
-                  <p>ביטול: {analysis.invalidIf ?? "-"}</p>
-
-                  {analysis.tradePlan && (
-                    <>
-                      <p>סטופ: {analysis.tradePlan.stopLoss.toFixed(2)}</p>
-                      <p>TP1 / TP2 / TP3: {analysis.tradePlan.takeProfit1.toFixed(2)} / {analysis.tradePlan.takeProfit2.toFixed(2)} / {analysis.tradePlan.takeProfit3.toFixed(2)}</p>
-                    </>
-                  )}
-
-                  <p>סיבה: {analysis.reasons[0]}</p>
-                </>
-              )}
+          <section className="section-block">
+            <header className="section-header">
+              <div>
+                <h2>כרטיסי מצב</h2>
+                <p>הניתוח האחרון שנשמר לכל צמד</p>
+              </div>
+            </header>
+            <div className="symbols-grid">
+              {data.symbols.map((symbol) => (
+                <SymbolCard key={symbol.symbol} symbol={symbol} />
+              ))}
             </div>
-          );
-        })}
-      </div>
+          </section>
 
-      {error && (
-        <p style={{ color: "#ef4444", marginTop: 16 }}>
-          Error: {error}
-        </p>
+          <AlertsTable alerts={data.alerts} />
+        </>
       )}
-    </div>
+    </main>
   );
 }

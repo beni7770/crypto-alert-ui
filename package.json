@@ -12,8 +12,9 @@
     "worker:once": "tsx server/run-once.ts",
     "tracking:once": "tsx server/tracking.ts",
     "backtest": "tsx server/backtest.ts",
+    "api": "tsx server/api.ts",
     "worker:dev": "tsx watch server/worker.ts",
-    "start": "tsx server/worker.ts"
+    "start": "tsx server/start.ts"
   },
   "dependencies": {
     "dotenv": "^16.6.1",

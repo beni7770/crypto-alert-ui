@@ -11,6 +11,7 @@ npm run worker:once
 npm run worker
 npm run tracking:once
 npm run backtest
+npm run api
 ```
 
 ## Environment
@@ -33,6 +34,8 @@ HIGH_INTERVAL=1h
 WORKER_INTERVAL_MS=300000
 TRACKING_CANDLE_LIMIT=500
 BACKTEST_ALERT_LIMIT=1000
+DASHBOARD_ALERT_LIMIT=200
+DASHBOARD_ANALYSIS_LIMIT=200
 ```
 
 `SYMBOL` / `SYMBOLS` משמשים fallback אם CoinGecko או Binance לא זמינים.
@@ -64,6 +67,16 @@ supabase.schema.sql
 npm run tracking:once
 npm run backtest
 ```
+
+## Dashboard
+
+הפקודה `npm start` מפעילה גם את ה-worker וגם שרת API/UI:
+
+- `GET /api/health` - בדיקת חיים.
+- `GET /api/dashboard` - סיכום ביצועים, כרטיסי מצב והתראות אחרונות.
+- `GET /api/alerts` - רשימת התראות בלבד.
+
+ה-UI קורא ל-API הזה ולא מחזיק `SUPABASE_SERVICE_ROLE_KEY` או מפתחות Telegram בצד הדפדפן.
 
 ## Alert Policy
 
