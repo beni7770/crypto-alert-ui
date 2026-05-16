@@ -25,6 +25,17 @@ export type KlineCandle = {
   closeTime: number;
 };
 
+type BinanceKline = [
+  number,
+  string,
+  string,
+  string,
+  string,
+  string,
+  number,
+  ...unknown[],
+];
+
 export async function getPrice(symbol: string): Promise<number> {
   const s = normalizeSymbol(symbol);
   const data = await fetchJson<{ symbol: string; price: string }>(
@@ -39,7 +50,7 @@ export async function getKlines(
   limit: number = 200
 ): Promise<KlineCandle[]> {
   const s = normalizeSymbol(symbol);
-  const data = await fetchJson<any[]>(
+  const data = await fetchJson<BinanceKline[]>(
     `${REST_BASE}/api/v3/klines?symbol=${s}&interval=${interval}&limit=${limit}`
   );
 
@@ -52,4 +63,28 @@ export async function getKlines(
     volume: Number(k[5]),
     closeTime: Number(k[6]),
   }));
+}
+
+type ExchangeInfoSymbol = {
+  symbol: string;
+  status: string;
+  quoteAsset: string;
+  isSpotTradingAllowed?: boolean;
+};
+
+export async function getTradableUsdtSymbols(): Promise<Set<string>> {
+  const data = await fetchJson<{ symbols: ExchangeInfoSymbol[] }>(
+    `${REST_BASE}/api/v3/exchangeInfo`
+  );
+
+  return new Set(
+    data.symbols
+      .filter(
+        (symbol) =>
+          symbol.status === "TRADING" &&
+          symbol.quoteAsset === "USDT" &&
+          symbol.isSpotTradingAllowed !== false
+      )
+      .map((symbol) => symbol.symbol)
+  );
 }

@@ -4,6 +4,7 @@ type AlertMessageOptions = {
   symbol: string;
   lowInterval: string;
   highInterval: string;
+  btcContext?: string;
 };
 
 function translateDecision(decision: SignalAnalysis["decision"]) {
@@ -50,13 +51,35 @@ function translateQuality(quality: SignalAnalysis["setupQuality"]) {
   }
 }
 
-export function shouldSendTelegramAlert(result: SignalAnalysis) {
-  return result.decision === "LONG" || result.decision === "SHORT";
+function qualityRank(quality: SignalAnalysis["setupQuality"]) {
+  switch (quality) {
+    case "HIGH":
+      return 3;
+    case "MEDIUM":
+      return 2;
+    default:
+      return 1;
+  }
 }
 
-export function createAlertKey(result: SignalAnalysis) {
+export function shouldSendTelegramAlert(
+  result: SignalAnalysis,
+  minWatchlistQuality: SignalAnalysis["setupQuality"] = "HIGH"
+) {
+  if (result.decision === "LONG" || result.decision === "SHORT") return true;
+
+  const isWatchlist =
+    result.setupState === "WATCHLIST_LONG" ||
+    result.setupState === "WATCHLIST_SHORT";
+
+  return isWatchlist && qualityRank(result.setupQuality) >= qualityRank(minWatchlistQuality);
+}
+
+export function createAlertKey(symbol: string, result: SignalAnalysis) {
   return [
+    symbol,
     result.decision,
+    result.setupState,
     result.tradePlan?.direction,
     result.triggerPrice?.toFixed(2),
     result.invalidationPrice?.toFixed(2),
@@ -73,8 +96,10 @@ export function buildTelegramMessage(result: SignalAnalysis, options: AlertMessa
     `צמד: ${options.symbol}`,
     `טיימפריים: ${options.lowInterval} / ${options.highInterval}`,
     `החלטה: ${translateDecision(result.decision)}`,
+    `מצב סטאפ: ${result.setupState}`,
     `איכות סטאפ: ${translateQuality(result.setupQuality)}`,
     `ביטחון: ${result.confidence}`,
+    `BTC: ${options.btcContext ?? "לא נבדק"}`,
     "",
     "Context:",
     `הטיה ${options.highInterval}: ${translateBias(result.higherTimeframe.bias)}`,

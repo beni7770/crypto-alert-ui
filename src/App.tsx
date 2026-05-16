@@ -1,135 +1,128 @@
 import { useEffect, useState } from "react";
 import { getKlines } from "./lib/binance";
+import { getMarketUniverse, type MarketUniverseCoin } from "./lib/market-universe";
 import { analyzeSignal, type SignalAnalysis } from "./lib/signal-engine";
 
+type SymbolCard = {
+  coin: MarketUniverseCoin;
+  analysis?: SignalAnalysis;
+  btcContext: "SELF" | "SUPPORTS" | "AGAINST" | "NEUTRAL" | "UNKNOWN";
+  error?: string;
+};
+
+function translateDecision(decision: SignalAnalysis["decision"]) {
+  switch (decision) {
+    case "LONG":
+      return "לונג";
+    case "SHORT":
+      return "שורט";
+    default:
+      return "המתנה";
+  }
+}
+
+function translateQuality(quality: SignalAnalysis["setupQuality"]) {
+  switch (quality) {
+    case "HIGH":
+      return "גבוהה";
+    case "MEDIUM":
+      return "בינונית";
+    default:
+      return "נמוכה";
+  }
+}
+
+function translateBtcContext(status: SymbolCard["btcContext"]) {
+  switch (status) {
+    case "SELF":
+      return "BTC";
+    case "SUPPORTS":
+      return "BTC תומך";
+    case "AGAINST":
+      return "BTC נגד";
+    case "NEUTRAL":
+      return "BTC ניטרלי";
+    default:
+      return "לא נבדק";
+  }
+}
+
+function getBtcContext(symbol: string, result?: SignalAnalysis, btcResult?: SignalAnalysis): SymbolCard["btcContext"] {
+  if (symbol === "BTCUSDT") return "SELF";
+  if (!result || !btcResult) return "UNKNOWN";
+  if (btcResult.context.direction === "NEUTRAL") return "NEUTRAL";
+  if (!result.setup.direction) return "NEUTRAL";
+  return btcResult.context.direction === result.setup.direction ? "SUPPORTS" : "AGAINST";
+}
+
+async function analyzeSymbol(symbol: string) {
+  const [candles5m, candles1h] = await Promise.all([
+    getKlines(symbol, "5m", 200),
+    getKlines(symbol, "1h", 200),
+  ]);
+
+  return analyzeSignal(candles5m, candles1h);
+}
+
 export default function App() {
-  const [analysis, setAnalysis] = useState<SignalAnalysis | null>(null);
+  const [cards, setCards] = useState<SymbolCard[]>([]);
   const [error, setError] = useState("");
   const [lastUpdate, setLastUpdate] = useState("");
-
-  function translateDecision(decision: SignalAnalysis["decision"]) {
-    switch (decision) {
-      case "LONG":
-        return "לונג";
-      case "SHORT":
-        return "שורט";
-      default:
-        return "המתנה";
-    }
-  }
-
-  function translateConfidence(confidence: SignalAnalysis["confidence"]) {
-    switch (confidence) {
-      case "HIGH":
-        return "גבוהה";
-      case "MEDIUM":
-        return "בינונית";
-      default:
-        return "נמוכה";
-    }
-  }
-
-  function translateStructure(structure: SignalAnalysis["structure"]) {
-    switch (structure) {
-      case "BULLISH":
-        return "שורי";
-      case "BEARISH":
-        return "דובי";
-      default:
-        return "דשדוש";
-    }
-  }
-
-  function translateDirection(direction: SignalAnalysis["bos"] | SignalAnalysis["choch"]) {
-    switch (direction) {
-      case "BULLISH":
-        return "שורי";
-      case "BEARISH":
-        return "דובי";
-      default:
-        return "ללא";
-    }
-  }
-
-  function translateBias(bias: SignalAnalysis["higherTimeframe"]["bias"]) {
-    switch (bias) {
-      case "BULLISH":
-        return "שורית";
-      case "BEARISH":
-        return "דובית";
-      default:
-        return "ניטרלית";
-    }
-  }
-
-  function translateSetupState(setupState: SignalAnalysis["setupState"]) {
-    switch (setupState) {
-      case "CONFLICT":
-        return "קונפליקט";
-      case "WATCHLIST_LONG":
-        return "מעקב ללונג";
-      case "WATCHLIST_SHORT":
-        return "מעקב לשורט";
-      case "READY_LONG":
-        return "לונג מאושר";
-      case "READY_SHORT":
-        return "שורט מאושר";
-      default:
-        return "ללא";
-    }
-  }
-
-  function translateQuality(quality: SignalAnalysis["setupQuality"]) {
-    switch (quality) {
-      case "HIGH":
-        return "גבוהה";
-      case "MEDIUM":
-        return "בינונית";
-      default:
-        return "נמוכה";
-    }
-  }
-
-  function translateRangePosition(position: SignalAnalysis["rangePosition"]) {
-    switch (position) {
-      case "LOWER":
-        return "תחתון";
-      case "UPPER":
-        return "עליון";
-      default:
-        return "אמצע";
-    }
-  }
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-
     async function load() {
       try {
         setError("");
-        const candles5m = await getKlines("BTCUSDT", "5m", 200);
-        const candles1h = await getKlines("BTCUSDT", "1h", 200);
-        const result = analyzeSignal(candles5m, candles1h);
+        setLoading(true);
 
-        setAnalysis(result);
+        const universe = await getMarketUniverse({
+          mode: "TOP_MARKET_CAP",
+          limit: 10,
+          fallbackSymbol: "BTCUSDT",
+        });
+        const btcCoin = universe.find((coin) => coin.binanceSymbol === "BTCUSDT");
+        const btcAnalysis = btcCoin ? await analyzeSymbol("BTCUSDT") : undefined;
+
+        const results = await Promise.allSettled(
+          universe.map(async (coin) => {
+            const analysis =
+              coin.binanceSymbol === "BTCUSDT" && btcAnalysis
+                ? btcAnalysis
+                : await analyzeSymbol(coin.binanceSymbol);
+
+            return {
+              coin,
+              analysis,
+              btcContext: getBtcContext(coin.binanceSymbol, analysis, btcAnalysis),
+            } satisfies SymbolCard;
+          })
+        );
+
+        setCards(
+          results.map((result, index) => {
+            if (result.status === "fulfilled") return result.value;
+
+            return {
+              coin: universe[index],
+              btcContext: "UNKNOWN",
+              error: result.reason instanceof Error ? result.reason.message : "שגיאה לא ידועה",
+            };
+          })
+        );
         setLastUpdate(new Date().toLocaleTimeString());
       } catch (err) {
         setError(err instanceof Error ? err.message : "שגיאה לא ידועה");
+      } finally {
+        setLoading(false);
       }
     }
 
     load();
-    interval = setInterval(load, 5000);
+    const interval = setInterval(load, 60000);
 
     return () => clearInterval(interval);
   }, []);
-
-  const decisionColor =
-    analysis?.decision === "LONG"
-      ? "#22c55e"
-      : analysis?.decision === "SHORT"
-        ? "#ef4444"
-        : "#f59e0b";
 
   return (
     <div
@@ -144,84 +137,76 @@ export default function App() {
       }}
     >
       <h1>סוכן התראות קריפטו</h1>
-      <p>צמד: BTCUSDT</p>
-      <p>טיימפריים נמוך: 5 דקות</p>
-      <p>טיימפריים גבוה: שעה</p>
+      <p>מצב: Top 10 לפי שווי שוק, צמדי USDT ב-Binance</p>
+      <p>טיימפריים: 5 דקות / שעה</p>
       <p>עדכון אחרון: {lastUpdate || "טוען..."}</p>
+      <p>Telegram ו-Supabase רצים בצד השרת בלבד.</p>
 
-      {analysis && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: 16,
-            borderRadius: 8,
-            border: `1px solid ${decisionColor}`,
-            background: "#111827",
-            maxWidth: 920,
-          }}
-        >
-          <h2 style={{ marginTop: 0 }}>החלטה: {translateDecision(analysis.decision)}</h2>
-          <p>רמת ביטחון: {translateConfidence(analysis.confidence)}</p>
-          <p>מצב סטאפ: {translateSetupState(analysis.setupState)}</p>
-          <p>איכות סטאפ: {translateQuality(analysis.setupQuality)}</p>
-          <p>מיקום בטווח: {translateRangePosition(analysis.rangePosition)}</p>
-          <p>תנאי כניסה: {analysis.validIf ?? "-"}</p>
-          <p>תנאי ביטול: {analysis.invalidIf ?? "-"}</p>
+      {loading && <p>מרענן נתונים...</p>}
 
-          <h3>Context</h3>
-          <p>כיוון קונטקסט: {analysis.context.direction}</p>
-          <p>יישור טיימפריימים: {analysis.context.aligned ? "כן" : "לא"}</p>
-          <p>קונפליקט: {analysis.context.conflict ? "כן" : "לא"}</p>
-          <p>EMA stack: {analysis.context.emaStack}</p>
-          <p>מומנטום: {analysis.context.momentum}</p>
-          <p>מצב נפח: {analysis.context.volumeState}</p>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+          gap: 12,
+          maxWidth: 1280,
+          marginTop: 20,
+        }}
+      >
+        {cards.map(({ coin, analysis, btcContext, error: cardError }) => {
+          const color =
+            analysis?.decision === "LONG"
+              ? "#22c55e"
+              : analysis?.decision === "SHORT"
+                ? "#ef4444"
+                : analysis?.setupState.startsWith("WATCHLIST")
+                  ? "#38bdf8"
+                  : "#f59e0b";
 
-          <h3>ניתוח 5 דקות</h3>
-          <p>מבנה: {translateStructure(analysis.structure)}</p>
-          <p>BOS: {translateDirection(analysis.bos)}</p>
-          <p>CHoCH: {translateDirection(analysis.choch)}</p>
-          <p>מחיר: {analysis.price.toFixed(2)}</p>
-          <p>ATR: {analysis.atr.toFixed(2)}</p>
-          <p>שיא קודם: {analysis.previousHigh.toFixed(2)}</p>
-          <p>שפל קודם: {analysis.previousLow.toFixed(2)}</p>
-          <p>שיא סווינג אחרון: {analysis.lastSwingHigh?.toFixed(2) ?? "-"}</p>
-          <p>שפל סווינג אחרון: {analysis.lastSwingLow?.toFixed(2) ?? "-"}</p>
-          <p>EMA 9 / 21 / 50 / 200: {analysis.ema9.toFixed(2)} / {analysis.ema21.toFixed(2)} / {analysis.ema50.toFixed(2)} / {analysis.ema200.toFixed(2)}</p>
-          <p>RSI: {analysis.rsi.toFixed(2)}</p>
-          <p>MACD: {analysis.macd.toFixed(2)}</p>
-          <p>יחס נפח: {analysis.volumeRatio.toFixed(2)}</p>
-          <p>עוצמת מגמה: {(analysis.trendStrength * 100).toFixed(2)}%</p>
-          <p>אזור ללא מסחר: {analysis.noTradeZone ? "כן" : "לא"}</p>
-          <p>ציון לונג / שורט: {analysis.longScore} / {analysis.shortScore}</p>
+          return (
+            <div
+              key={coin.binanceSymbol}
+              style={{
+                border: `1px solid ${color}`,
+                borderRadius: 8,
+                background: "#111827",
+                padding: 14,
+                minHeight: 260,
+              }}
+            >
+              <h2 style={{ marginTop: 0, marginBottom: 4 }}>{coin.binanceSymbol}</h2>
+              <p style={{ marginTop: 0 }}>{coin.name} {coin.marketCapRank ? `#${coin.marketCapRank}` : ""}</p>
 
-          <h3>אישור שעה</h3>
-          <p>הטיה: {translateBias(analysis.higherTimeframe.bias)}</p>
-          <p>מבנה: {translateStructure(analysis.higherTimeframe.structure)}</p>
-          <p>BOS: {translateDirection(analysis.higherTimeframe.bos)}</p>
-          <p>CHoCH: {translateDirection(analysis.higherTimeframe.choch)}</p>
-          <p>EMA 50 / 200: {analysis.higherTimeframe.ema50.toFixed(2)} / {analysis.higherTimeframe.ema200.toFixed(2)}</p>
-          <p>RSI: {analysis.higherTimeframe.rsi.toFixed(2)}</p>
+              {cardError && <p style={{ color: "#ef4444" }}>שגיאה: {cardError}</p>}
 
-          {analysis.tradePlan && (
-            <>
-              <h3>תוכנית עסקה</h3>
-              <p>כיוון: {analysis.tradePlan.direction}</p>
-              <p>כניסה: {analysis.tradePlan.entry.toFixed(2)}</p>
-              <p>סטופ: {analysis.tradePlan.stopLoss.toFixed(2)}</p>
-              <p>יעד 1: {analysis.tradePlan.takeProfit1.toFixed(2)}</p>
-              <p>יעד 2: {analysis.tradePlan.takeProfit2.toFixed(2)}</p>
-              <p>יעד 3: {analysis.tradePlan.takeProfit3.toFixed(2)}</p>
-            </>
-          )}
+              {analysis && (
+                <>
+                  <p>החלטה: {translateDecision(analysis.decision)}</p>
+                  <p>סטאפ: {analysis.setupState}</p>
+                  <p>איכות: {translateQuality(analysis.setupQuality)}</p>
+                  <p>מחיר: {analysis.price.toFixed(2)}</p>
+                  <p>BTC: {translateBtcContext(btcContext)}</p>
+                  <p>Context: {analysis.context.direction}</p>
+                  <p>EMA: {analysis.context.emaStack}</p>
+                  <p>מומנטום: {analysis.context.momentum}</p>
+                  <p>נפח: {analysis.context.volumeState}</p>
+                  <p>כניסה: {analysis.validIf ?? "-"}</p>
+                  <p>ביטול: {analysis.invalidIf ?? "-"}</p>
 
-          <h3>סיבות</h3>
-          <ul>
-            {analysis.reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+                  {analysis.tradePlan && (
+                    <>
+                      <p>סטופ: {analysis.tradePlan.stopLoss.toFixed(2)}</p>
+                      <p>TP1 / TP2 / TP3: {analysis.tradePlan.takeProfit1.toFixed(2)} / {analysis.tradePlan.takeProfit2.toFixed(2)} / {analysis.tradePlan.takeProfit3.toFixed(2)}</p>
+                    </>
+                  )}
+
+                  <p>סיבה: {analysis.reasons[0]}</p>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       {error && (
         <p style={{ color: "#ef4444", marginTop: 16 }}>
