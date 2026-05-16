@@ -36,10 +36,20 @@ function isSupabaseConfigured() {
   return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
 
+function getSupabaseRestUrl(table: string) {
+  if (!SUPABASE_URL) return "";
+
+  const baseUrl = SUPABASE_URL.trim()
+    .replace(/\/+$/, "")
+    .replace(/\/rest\/v1$/, "");
+
+  return `${baseUrl}/rest/v1/${table}`;
+}
+
 async function insertRows<T extends object>(table: string, rows: T[]) {
   if (!isSupabaseConfigured()) return;
 
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+  const res = await fetch(getSupabaseRestUrl(table), {
     method: "POST",
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY!,
@@ -99,7 +109,7 @@ export async function alertExists(alertKey: string) {
     select: "id",
     limit: "1",
   });
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/alerts?${params.toString()}`, {
+  const res = await fetch(`${getSupabaseRestUrl("alerts")}?${params.toString()}`, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY!,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
