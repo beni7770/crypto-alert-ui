@@ -74,9 +74,12 @@ npm run backtest
 
 - `GET /api/health` - בדיקת חיים.
 - `GET /api/dashboard` - סיכום ביצועים, כרטיסי מצב והתראות אחרונות.
+- `GET /api/dashboard` כולל גם `analytics` לפי צמד, כיוון, איכות סטאפ, מצב סטאפ, הקשר BTC ותוצאה.
 - `GET /api/alerts` - רשימת התראות בלבד.
 
 ה-UI קורא ל-API הזה ולא מחזיק `SUPABASE_SERVICE_ROLE_KEY` או מפתחות Telegram בצד הדפדפן.
+
+אזור "ניתוח איכות המנוע" בדשבורד מציג Performance Breakdown, Top/Bottom לפי `Average R` ו-`Total R`, ומסמן קבוצות עם פחות מ-5 עסקאות סגורות כמדגם קטן.
 
 ## Alert Policy
 

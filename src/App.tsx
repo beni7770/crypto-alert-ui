@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import type { DashboardAlert, DashboardResponse, DashboardSymbol } from "./lib/dashboard-types";
+import type {
+  DashboardAlert,
+  DashboardAnalytics,
+  DashboardResponse,
+  DashboardSymbol,
+  PerformanceGroup,
+} from "./lib/dashboard-types";
 
 type AlertFilter = "ALL" | "OPEN" | "CLOSED" | "WATCHLIST";
+type AnalyticsTab = keyof Pick<
+  DashboardAnalytics,
+  "bySymbol" | "byDirection" | "bySetupQuality" | "bySetupState" | "byBtcContext" | "byOutcome"
+>;
 
 function formatNumber(value: number | null | undefined, digits = 2) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "-";
@@ -78,6 +88,50 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
   );
 }
 
+function SampleBadge({ group }: { group: PerformanceGroup }) {
+  if (group.sampleSize === "OK") return null;
+  return <span className="sample-badge">מדגם קטן</span>;
+}
+
+function InsightCard({
+  title,
+  group,
+  emptyText,
+  tone,
+}: {
+  title: string;
+  group?: PerformanceGroup;
+  emptyText: string;
+  tone?: string;
+}) {
+  return (
+    <article className={`insight-card ${tone ?? ""}`}>
+      <span>{title}</span>
+      {group ? (
+        <>
+          <strong>{group.label}</strong>
+          <p>
+            {formatNumber(group.averageR)}R ממוצע · {formatNumber(group.totalR)}R סה״כ ·{" "}
+            {formatPercent(group.winRate)}
+          </p>
+          <SampleBadge group={group} />
+        </>
+      ) : (
+        <p>{emptyText}</p>
+      )}
+    </article>
+  );
+}
+
+const ANALYTICS_TABS: { key: AnalyticsTab; label: string }[] = [
+  { key: "bySymbol", label: "צמד" },
+  { key: "byDirection", label: "כיוון" },
+  { key: "bySetupQuality", label: "איכות" },
+  { key: "bySetupState", label: "סטאפ" },
+  { key: "byBtcContext", label: "BTC" },
+  { key: "byOutcome", label: "תוצאה" },
+];
+
 function SymbolCard({ symbol }: { symbol: DashboardSymbol }) {
   return (
     <article className={`symbol-card ${decisionClass(symbol.decision, symbol.setupState)}`}>
@@ -121,6 +175,108 @@ function SymbolCard({ symbol }: { symbol: DashboardSymbol }) {
         <p>{symbol.invalidIf ?? "אין תנאי ביטול פעיל"}</p>
       </footer>
     </article>
+  );
+}
+
+function AnalyticsSection({ analytics }: { analytics: DashboardAnalytics }) {
+  const [tab, setTab] = useState<AnalyticsTab>("bySymbol");
+  const groups = analytics[tab];
+
+  return (
+    <section className="table-section analytics-section">
+      <header className="section-header">
+        <div>
+          <h2>ניתוח איכות המנוע</h2>
+          <p>מה עובד, מה פוגע בביצועים, ואיפה המדגם עדיין קטן</p>
+        </div>
+        <div className="segmented">
+          {ANALYTICS_TABS.map((option) => (
+            <button
+              key={option.key}
+              className={tab === option.key ? "active" : ""}
+              type="button"
+              onClick={() => setTab(option.key)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="insights-grid">
+        <InsightCard
+          title="הכי טוב לפי Average R"
+          group={analytics.topAverageR[0]}
+          emptyText="אין עדיין עסקאות סגורות"
+          tone="positive"
+        />
+        <InsightCard
+          title="הכי חלש לפי Average R"
+          group={analytics.bottomAverageR[0]}
+          emptyText="אין עדיין עסקאות סגורות"
+          tone="negative"
+        />
+        <InsightCard
+          title="הכי תורם לפי Total R"
+          group={analytics.topTotalR[0]}
+          emptyText="אין עדיין עסקאות סגורות"
+          tone="positive"
+        />
+        <InsightCard
+          title="הכי פוגע לפי Total R"
+          group={analytics.bottomTotalR[0]}
+          emptyText="אין עדיין עסקאות סגורות"
+          tone="negative"
+        />
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>קבוצה</th>
+              <th>עסקאות</th>
+              <th>פתוחות</th>
+              <th>סגורות</th>
+              <th>Win rate</th>
+              <th>Total R</th>
+              <th>Average R</th>
+              <th>Best R</th>
+              <th>Worst R</th>
+              <th>אמינות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((group) => (
+              <tr key={group.key}>
+                <td>
+                  <strong>{group.label}</strong>
+                  <span>{group.key}</span>
+                </td>
+                <td>{group.totalTrades}</td>
+                <td>{group.openTrades}</td>
+                <td>{group.closedTrades}</td>
+                <td>{formatPercent(group.winRate)}</td>
+                <td className={group.totalR >= 0 ? "positive" : "negative"}>
+                  {formatNumber(group.totalR)}R
+                </td>
+                <td className={group.averageR >= 0 ? "positive" : "negative"}>
+                  {formatNumber(group.averageR)}R
+                </td>
+                <td>{group.bestR === null ? "-" : `${formatNumber(group.bestR)}R`}</td>
+                <td>{group.worstR === null ? "-" : `${formatNumber(group.worstR)}R`}</td>
+                <td>{group.sampleSize === "SMALL" ? <SampleBadge group={group} /> : "תקין"}</td>
+              </tr>
+            ))}
+            {groups.length === 0 && (
+              <tr>
+                <td colSpan={10}>אין עדיין עסקאות Trade לניתוח.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
@@ -282,6 +438,8 @@ export default function App() {
               ))}
             </div>
           </section>
+
+          <AnalyticsSection analytics={data.analytics} />
 
           <AlertsTable alerts={data.alerts} />
         </>

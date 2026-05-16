@@ -57,9 +57,39 @@ export type DashboardSummary = {
   worstSymbol?: string;
 };
 
+export type PerformanceGroup = {
+  key: string;
+  label: string;
+  totalTrades: number;
+  closedTrades: number;
+  openTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  totalR: number;
+  averageR: number;
+  bestR: number | null;
+  worstR: number | null;
+  sampleSize: "SMALL" | "OK";
+};
+
+export type DashboardAnalytics = {
+  bySymbol: PerformanceGroup[];
+  byDirection: PerformanceGroup[];
+  bySetupQuality: PerformanceGroup[];
+  bySetupState: PerformanceGroup[];
+  byBtcContext: PerformanceGroup[];
+  byOutcome: PerformanceGroup[];
+  topAverageR: PerformanceGroup[];
+  bottomAverageR: PerformanceGroup[];
+  topTotalR: PerformanceGroup[];
+  bottomTotalR: PerformanceGroup[];
+};
+
 export type DashboardResponse = {
   generatedAt: string;
   summary: DashboardSummary;
+  analytics: DashboardAnalytics;
   symbols: DashboardSymbol[];
   alerts: DashboardAlert[];
 };
