@@ -18,10 +18,12 @@ const HIGH_INTERVAL = process.env.HIGH_INTERVAL || "1h";
 const LOOP_MS = Number(process.env.WORKER_INTERVAL_MS || "300000");
 const WATCHLIST_ALERT_MIN_QUALITY =
   (process.env.WATCHLIST_ALERT_MIN_QUALITY as SignalAnalysis["setupQuality"]) || "HIGH";
+const NO_SIGNAL_SUMMARY_INTERVAL_MS = Number(process.env.NO_SIGNAL_SUMMARY_INTERVAL_MS || "21600000");
 
 type BtcContextStatus = "SELF" | "SUPPORTS" | "AGAINST" | "NEUTRAL" | "UNKNOWN";
 
 const sentAlertKeys = new Set<string>();
+let lastNoSignalSummaryAt = 0;
 
 function getBtcContext(symbol: string, result: SignalAnalysis, btcResult?: SignalAnalysis): BtcContextStatus {
   if (symbol === "BTCUSDT") return "SELF";
@@ -123,6 +125,61 @@ async function maybeSendAlert(symbol: string, result: SignalAnalysis, btcContext
   }
 }
 
+function translateDecisionLabel(result: SignalAnalysis) {
+  if (result.decision === "LONG") return "לונג";
+  if (result.decision === "SHORT") return "שורט";
+  if (result.setupState === "WATCHLIST_LONG") return "מעקב לונג";
+  if (result.setupState === "WATCHLIST_SHORT") return "מעקב שורט";
+  if (result.setupState === "CONFLICT") return "קונפליקט";
+  return "המתנה";
+}
+
+function shouldSendNoSignalSummary(now = Date.now()) {
+  return now - lastNoSignalSummaryAt >= NO_SIGNAL_SUMMARY_INTERVAL_MS;
+}
+
+async function sendNoSignalSummary(
+  results: { symbol: string; result: SignalAnalysis; btcContext: BtcContextStatus }[]
+) {
+  if (!shouldSendNoSignalSummary()) return;
+
+  const interesting = [...results]
+    .sort((a, b) => b.result.setup.score - a.result.setup.score)
+    .slice(0, 5);
+  const conflicts = results.filter((item) => item.result.setupState === "CONFLICT").length;
+  const watchlists = results.filter((item) => item.result.setupState.startsWith("WATCHLIST")).length;
+  const highQuality = results.filter((item) => item.result.setupQuality === "HIGH").length;
+
+  const lines = [
+    "📊 סיכום סריקה - אין טריגר מאושר",
+    `נבדקו צמדים: ${results.length}`,
+    `מעקב: ${watchlists}`,
+    `קונפליקט: ${conflicts}`,
+    `איכות גבוהה בלי טריגר: ${highQuality}`,
+    "",
+    "הצמדים הכי קרובים:",
+    ...interesting.map(({ symbol, result }) =>
+      [
+        `${symbol}: ${translateDecisionLabel(result)}`,
+        `איכות ${result.setupQuality}`,
+        `ניקוד ${result.setup.score}`,
+        `מחיר ${result.price}`,
+        result.reasons[0],
+      ].join(" | ")
+    ),
+    "",
+    "אין כרגע עסקה איכותית לפי החוקים. הסוכן פעיל וממשיך לסרוק.",
+  ];
+
+  try {
+    await sendTelegramMessage(lines.join("\n"));
+    lastNoSignalSummaryAt = Date.now();
+    console.log("סיכום ללא סיגנל נשלח לטלגרם.");
+  } catch (error) {
+    console.error("שליחת סיכום ללא סיגנל נכשלה:", error);
+  }
+}
+
 export async function runCycle() {
   const startedAt = new Date().toISOString();
   const universe = await getMarketUniverse(getUniverseConfigFromEnv(process.env));
@@ -136,10 +193,14 @@ export async function runCycle() {
     btcResult = await analyzeSymbol("BTCUSDT");
   }
 
+  const cycleResults: { symbol: string; result: SignalAnalysis; btcContext: BtcContextStatus }[] = [];
+  let sentSignalThisCycle = false;
+
   for (const symbol of symbols) {
     try {
       const result = symbol === "BTCUSDT" && btcResult ? btcResult : await analyzeSymbol(symbol);
       const btcContext = getBtcContext(symbol, result, btcResult);
+      cycleResults.push({ symbol, result, btcContext });
 
       console.log("תוצאת ניתוח:", {
         symbol,
@@ -155,10 +216,18 @@ export async function runCycle() {
       });
 
       await persistAnalysis(symbol, result, btcContext);
+      const beforeAlertCount = sentAlertKeys.size;
       await maybeSendAlert(symbol, result, btcContext);
+      if (sentAlertKeys.size > beforeAlertCount) {
+        sentSignalThisCycle = true;
+      }
     } catch (error) {
       console.error(`שגיאה בניתוח ${symbol}:`, error);
     }
+  }
+
+  if (!sentSignalThisCycle && cycleResults.length > 0) {
+    await sendNoSignalSummary(cycleResults);
   }
 
   try {

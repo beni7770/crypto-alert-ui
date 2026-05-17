@@ -36,6 +36,7 @@ TRACKING_CANDLE_LIMIT=500
 BACKTEST_ALERT_LIMIT=1000
 DASHBOARD_ALERT_LIMIT=200
 DASHBOARD_ANALYSIS_LIMIT=200
+NO_SIGNAL_SUMMARY_INTERVAL_MS=21600000
 ```
 
 `SYMBOL` / `SYMBOLS` משמשים fallback אם CoinGecko או Binance לא זמינים.
@@ -87,5 +88,6 @@ Telegram שולח:
 
 - `LONG` / `SHORT` מאושרים.
 - `WATCHLIST_LONG` / `WATCHLIST_SHORT` רק אם איכות הסטאפ עומדת ב-`WATCHLIST_ALERT_MIN_QUALITY`.
+- אם אין אף סיגנל שנשלח, ה-worker שולח סיכום שוק תקופתי לפי `NO_SIGNAL_SUMMARY_INTERVAL_MS` כדי לוודא שהבוט חי ולהציג את הצמדים הכי קרובים לסטאפ.
 
 ה-UI לא מחזיק מפתחות Telegram או Supabase. הוא מציג כרטיסי מצב דרך APIs ציבוריים בלבד.
