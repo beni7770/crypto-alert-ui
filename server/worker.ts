@@ -79,19 +79,19 @@ async function persistAnalysis(symbol: string, result: SignalAnalysis, btcContex
 }
 
 async function maybeSendAlert(symbol: string, result: SignalAnalysis, btcContext: BtcContextStatus) {
-  if (!shouldSendTelegramAlert(result, WATCHLIST_ALERT_MIN_QUALITY)) return;
+  if (!shouldSendTelegramAlert(result, WATCHLIST_ALERT_MIN_QUALITY)) return false;
 
   const alertKey = createAlertKey(symbol, result);
   if (sentAlertKeys.has(alertKey)) {
     console.log(`התראה כפולה עבור ${symbol}. מדלג.`);
-    return;
+    return false;
   }
 
   try {
     if (await alertExists(alertKey)) {
       sentAlertKeys.add(alertKey);
       console.log(`התראה כבר קיימת ב-Supabase עבור ${symbol}. מדלג.`);
-      return;
+      return false;
     }
   } catch (error) {
     console.error(`בדיקת כפילות ב-Supabase נכשלה עבור ${symbol}:`, error);
@@ -120,8 +120,10 @@ async function maybeSendAlert(symbol: string, result: SignalAnalysis, btcContext
       analysis: result,
     });
     console.log(`התראת ${alertType} נשלחה עבור ${symbol}.`);
+    return true;
   } catch (error) {
     console.error(`שליחת התראה נכשלה עבור ${symbol}:`, error);
+    return false;
   }
 }
 
@@ -216,9 +218,7 @@ export async function runCycle() {
       });
 
       await persistAnalysis(symbol, result, btcContext);
-      const beforeAlertCount = sentAlertKeys.size;
-      await maybeSendAlert(symbol, result, btcContext);
-      if (sentAlertKeys.size > beforeAlertCount) {
+      if (await maybeSendAlert(symbol, result, btcContext)) {
         sentSignalThisCycle = true;
       }
     } catch (error) {
