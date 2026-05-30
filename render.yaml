@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: crypto-alert-ui
+    runtime: node
+    plan: starter
+    region: frankfurt
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.3
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: MARKET_UNIVERSE_MODE
+        value: TOP_MARKET_CAP
+      - key: MARKET_UNIVERSE_LIMIT
+        value: 10
+      - key: SYMBOL
+        value: BTCUSDT
+      - key: SYMBOLS
+        value: BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
+      - key: LOW_INTERVAL
+        value: 5m
+      - key: HIGH_INTERVAL
+        value: 1h
+      - key: WORKER_INTERVAL_MS
+        value: 300000
+      - key: TRACKING_CANDLE_LIMIT
+        value: 500
+      - key: DASHBOARD_ALERT_LIMIT
+        value: 200
+      - key: DASHBOARD_ANALYSIS_LIMIT
+        value: 200

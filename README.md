@@ -85,3 +85,23 @@ npm run backtest
 Telegram שולח רק `LONG` / `SHORT` מאושרים עם תוכנית עסקה מלאה. `WATCHLIST`, `WAIT` וסיכומי "אין סיגנל" נשמרים/מוצגים במערכת אבל לא נשלחים לטלגרם.
 
 ה-UI לא מחזיק מפתחות Telegram או Supabase. הוא מציג כרטיסי מצב דרך APIs ציבוריים בלבד.
+
+## Deploy to Render
+
+הפרויקט כולל `render.yaml` מוכן ל-Blueprint. ב-Render:
+
+1. צור Blueprint חדש וחבר את הריפו `beni7770/crypto-alert-ui`.
+2. בחר את branch `main`.
+3. מלא את הערכים הסודיים שלא נשמרים בקוד:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_CHAT_ID`
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+4. ודא שהפקודות הן:
+   - Build Command: `npm ci && npm run build`
+   - Start Command: `npm start`
+5. אחרי deploy מוצלח, פתח את הכתובת של Render:
+   - `/` לדשבורד
+   - `/api/health` לבדיקת חיים
+
+Render מזריק את `PORT` אוטומטית, והשרת מאזין על `0.0.0.0`, לכן לא צריך להגדיר פורט ידנית.
