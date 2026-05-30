@@ -51,28 +51,8 @@ function translateQuality(quality: SignalAnalysis["setupQuality"]) {
   }
 }
 
-function qualityRank(quality: SignalAnalysis["setupQuality"]) {
-  switch (quality) {
-    case "HIGH":
-      return 3;
-    case "MEDIUM":
-      return 2;
-    default:
-      return 1;
-  }
-}
-
-export function shouldSendTelegramAlert(
-  result: SignalAnalysis,
-  minWatchlistQuality: SignalAnalysis["setupQuality"] = "HIGH"
-) {
-  if (result.decision === "LONG" || result.decision === "SHORT") return true;
-
-  const isWatchlist =
-    result.setupState === "WATCHLIST_LONG" ||
-    result.setupState === "WATCHLIST_SHORT";
-
-  return isWatchlist && qualityRank(result.setupQuality) >= qualityRank(minWatchlistQuality);
+export function shouldSendTelegramAlert(result: SignalAnalysis) {
+  return result.decision === "LONG" || result.decision === "SHORT";
 }
 
 export function createAlertKey(symbol: string, result: SignalAnalysis) {

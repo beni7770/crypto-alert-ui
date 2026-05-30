@@ -25,7 +25,6 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 MARKET_UNIVERSE_MODE=TOP_MARKET_CAP
 MARKET_UNIVERSE_LIMIT=10
-WATCHLIST_ALERT_MIN_QUALITY=HIGH
 
 SYMBOL=BTCUSDT
 SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT
@@ -36,7 +35,6 @@ TRACKING_CANDLE_LIMIT=500
 BACKTEST_ALERT_LIMIT=1000
 DASHBOARD_ALERT_LIMIT=200
 DASHBOARD_ANALYSIS_LIMIT=200
-NO_SIGNAL_SUMMARY_INTERVAL_MS=21600000
 ```
 
 `SYMBOL` / `SYMBOLS` משמשים fallback אם CoinGecko או Binance לא זמינים.
@@ -84,10 +82,6 @@ npm run backtest
 
 ## Alert Policy
 
-Telegram שולח:
-
-- `LONG` / `SHORT` מאושרים.
-- `WATCHLIST_LONG` / `WATCHLIST_SHORT` רק אם איכות הסטאפ עומדת ב-`WATCHLIST_ALERT_MIN_QUALITY`.
-- אם אין אף סיגנל שנשלח, ה-worker שולח סיכום שוק תקופתי לפי `NO_SIGNAL_SUMMARY_INTERVAL_MS` כדי לוודא שהבוט חי ולהציג את הצמדים הכי קרובים לסטאפ.
+Telegram שולח רק `LONG` / `SHORT` מאושרים עם תוכנית עסקה מלאה. `WATCHLIST`, `WAIT` וסיכומי "אין סיגנל" נשמרים/מוצגים במערכת אבל לא נשלחים לטלגרם.
 
 ה-UI לא מחזיק מפתחות Telegram או Supabase. הוא מציג כרטיסי מצב דרך APIs ציבוריים בלבד.

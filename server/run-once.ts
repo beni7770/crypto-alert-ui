@@ -14,8 +14,6 @@ import { trackOpenAlerts } from "./tracking";
 
 const LOW_INTERVAL = process.env.LOW_INTERVAL || "5m";
 const HIGH_INTERVAL = process.env.HIGH_INTERVAL || "1h";
-const WATCHLIST_ALERT_MIN_QUALITY =
-  (process.env.WATCHLIST_ALERT_MIN_QUALITY as SignalAnalysis["setupQuality"]) || "HIGH";
 
 type BtcContextStatus = "SELF" | "SUPPORTS" | "AGAINST" | "NEUTRAL" | "UNKNOWN";
 
@@ -96,7 +94,7 @@ async function run() {
         analysis: result,
       });
 
-      if (!shouldSendTelegramAlert(result, WATCHLIST_ALERT_MIN_QUALITY)) {
+      if (!shouldSendTelegramAlert(result)) {
         console.log(`אין התראה לשליחה עבור ${symbol}.`);
         continue;
       }
@@ -108,7 +106,7 @@ async function run() {
         btcContext: translateBtcContext(btcContext),
       });
       const alertKey = createAlertKey(symbol, result);
-      const alertType = result.decision === "WAIT" ? "WATCHLIST" : "TRADE";
+      const alertType = "TRADE";
 
       if (await alertExists(alertKey)) {
         console.log(`התראה כבר קיימת ב-Supabase עבור ${symbol}. מדלג.`);
